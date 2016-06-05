@@ -1,0 +1,80 @@
+---
+- name: import nginx repo key
+  rpm_key:
+    key: http://nginx.org/keys/nginx_signing.key
+    state: present
+
+- name: copy repository the nginx.repo
+  copy: src=nginx.repo dest=/etc/yum.repos.d/
+
+- name: install the nginx
+  yum: name=nginx state=present enablerepo=nginx
+
+- name: start and enabled nginx service
+  service: name=nginx state=started enabled=yes
+
+- name: add nginx.conf
+  replace: >
+    dest=/etc/nginx/nginx.conf
+    regexp="include */etc/nginx/conf.d/\*.conf;"
+    replace="include sites-enabled/*.conf;"
+  notify: reload nginx
+
+- name: mkdir sites-available sites-enabled
+  file:
+    path: "{{ item }}"
+    state: directory
+  with_items:
+      - "/etc/nginx/sites-available"
+      - "/etc/nginx/sites-enabled"
+
+- name: set the nginx config file
+  template:
+    src: nginx.default.conf.j2
+    dest: /etc/nginx/sites-available/{{ server_hostname }}.conf
+  notify: reload nginx
+  failed_when: False
+  tags:
+    - nconf
+
+- name: enable the nginx config file
+  file:
+    src: /etc/nginx/sites-available/{{ server_hostname }}.conf
+    dest: /etc/nginx/sites-enabled/{{ server_hostname }}.conf
+    state: link
+  notify: reload nginx
+
+- name: remove the default nginx config file
+  file:
+    path: /etc/nginx/sites-enabled/default
+    state: absent
+  notify: reload nginx
+
+- name: mkdir nginx_rootpath
+  file:
+    path: "{{ nginx_rootpath }}"
+    state: directory
+    mode: 0755
+
+- name: copy index.html
+  copy: src=index.html dest={{ nginx_rootpath }}
+
+- name: copy info.php
+  copy: src=info.php dest={{ nginx_rootpath }}
+
+- name: ensure config path exists
+  file:
+    path: "{{ ssl_conf_path }}"
+    state: directory
+    owner: root
+    group: root
+    mode: 0700
+  when: tls_enabled
+
+- name: copy tls certificates
+  copy: src={{ item }} dest={{ ssl_conf_path }} mode=600
+  with_items:
+    - nginx.pem
+    - nginx.key
+    - cert.password
+  notify: reload nginx
